@@ -431,6 +431,20 @@ footer.foot { max-width: 1320px; margin: 0 auto; padding: 0 20px 36px; font-size
   .tri-bay button .ic { width: 15px; height: 15px; }
   .mname { display: block; }
 }
+
+/* ---------- dnevnik polnilnic ---------- */
+.log-cars { max-height: none; }
+.log-cars thead th { white-space: normal; vertical-align: bottom; }
+.log-cars th:nth-child(-n+3), .log-cars td.tm, .log-cars th:nth-child(4) { text-align: left; }
+.log-cars td.car b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+                     background: var(--surface-2); border: 1px solid var(--line-2); font: 600 13px var(--font-mono); }
+.log-cars td.tm b { display: block; font-weight: 600; }
+.log-cars td.tm small { display: block; font-size: 11.5px; color: var(--muted); }
+.log-cars tbody tr.st-wait td:not(.note):not(.car) { color: var(--muted); }
+.log-cars tbody tr.st-wait td.note { color: var(--muted); }
+.log-cars tbody tr.sel td { background: var(--surface-2); }
+.log-cars tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
+.log-cars td { padding-top: 10px; padding-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -673,13 +687,13 @@ footer.foot { max-width: 1320px; margin: 0 auto; padding: 0 20px 36px; font-size
     </section>
 
     <section class="card" aria-labelledby="h-log">
-      <header><h2 id="h-log">Dnevnik dogodkov</h2><span class="sub" id="log-sub"></span></header>
+      <header><h2 id="h-log">Dnevnik polnilnic</h2><span class="sub" id="log-sub"></span></header>
       <div class="body">
-        <div class="log-box" id="log-box"><table>
-          <thead><tr><th>Čas</th><th>Avto</th><th>Dogodek</th><th>Način</th><th>Baterija</th><th class="note">Opomba</th></tr></thead>
+        <div class="log-box log-cars" id="log-box"><table>
+          <thead><tr><th>Polnilnica</th><th>Čas prihoda</th><th>Čas odhoda</th><th>Način polnjenja</th><th>Baterija ob prihodu</th><th>Baterija ob odhodu</th><th class="note">Opombe</th></tr></thead>
           <tbody id="log-tbody"></tbody>
         </table></div>
-        <p class="hint" id="log-foot"></p>
+        <p class="hint">Vrstica se izpolni, ko avto pride, in dopolni, ko odide. Klik na vrstico izbere avto.</p>
       </div>
     </section>
 
@@ -1022,7 +1036,7 @@ function runRules(prof, cars, options) {
 ------------------------------------------------------------------- */
 const $ = id => document.getElementById(id);
 const fmt = (x, d = 1) => x.toFixed(d).replace('.', ',');
-const pct = (x, d = 0) => fmt(x * 100, d) + ' %';
+const pct = (x, d = 0) => fmt(x * 100, d) + '\u00a0%';
 const hh = hod => String(hod).padStart(2, '0') + '.00';
 const hodOf = h => (H0 + h) % 24;
 const dayOf = h => (H0 + h) < 24 ? 1 : 2;
@@ -1037,7 +1051,6 @@ const WX = { jasno: 'jasno', spremenljivo: 'spremenljivo', oblacno: 'oblačno' }
 /* slovenske oblike: 1, 2, 3–4, 5+ */
 const plural = (n, f) => { const m = Math.abs(n) % 100; return m === 1 ? f[0] : m === 2 ? f[1] : (m === 3 || m === 4) ? f[2] : f[3]; };
 const SUN_H = ['sončna ura', 'sončni uri', 'sončne ure', 'sončnih ur'];
-const EVENTS = ['dogodek', 'dogodka', 'dogodki', 'dogodkov'];
 const inHours = n => n + ' ' + (n === 1 ? 'uri' : 'urah');
 
 const IC = {
@@ -1085,7 +1098,7 @@ const STEP = {
 const clonePreset = k => { const p = PRESETS[k]; return { scn: { ...p.scn }, n: p.n, cars: p.cars.map(c => ({ ...c })), sel: p.sel,
   hour: p.hour, timing: true, timeSeed: p.timeSeed, preset: k }; };
 let S = clonePreset('osnovni');
-let prof, R, EV = [], playing = false, playTimer = null, strip = null;
+let prof, R, playing = false, playTimer = null, strip = null;
 
 /* ---------- izračun ---------- */
 function compute() {
@@ -1099,7 +1112,6 @@ function compute() {
     for (let h = 0; h < NH; h++) { p += c.evPv[h]; g += c.evGrid[h]; c.csPv[h] = p; c.csGrid[h] = g; }
     c.base = c.soc0 * CAR.C;
   });
-  EV = buildEvents();
   S.hour = clamp(S.hour, 0, NH - 1);
   S.sel = clamp(S.sel, 0, S.n - 1);
 }
@@ -1201,7 +1213,7 @@ function bindControls() {
 }
 function selectCar(i) {
   S.sel = clamp(i, 0, S.n - 1);
-  renderControls(); renderBays(); renderDecision(); renderStrip();
+  renderControls(); renderBays(); renderDecision(); renderStrip(); renderLog();
 }
 
 /* ---------- čas ---------- */
@@ -1571,60 +1583,46 @@ function bindStrip() {
   svg.addEventListener('mouseleave', () => { tip.hidden = true; });
 }
 
-/* ---------- dnevnik dogodkov ---------- */
-const EV_ORDER = { arr: 0, full: 1, dep: 2 };
-function buildEvents() {
-  const ev = [];
-  R.cars.forEach((c, i) => {
-    ev.push({ min: c.A, i, type: 'arr' });
-    if (c.fullMin != null && c.fullMin <= c.Dm) ev.push({ min: c.fullMin, i, type: 'full' });
-    ev.push({ min: c.Dm, i, type: 'dep' });
-  });
-  return ev.sort((a, b) => a.min - b.min || EV_ORDER[a.type] - EV_ORDER[b.type] || a.i - b.i);
-}
-function eventRow(e) {
-  const c = R.cars[e.i], cs = S.cars[e.i];
-  let what, batt, note;
-  if (e.type === 'arr') {
-    what = 'Prihod'; batt = `<b>${pct(c.soc0)}</b><small>${fmt(c.base)} kWh</small>`;
-    const dev = c.A - (cs.arr - H0) * 60;
-    note = (dev === 0 ? 'Prišel ob napovedanem času. ' : `Napovedan prihod ${hh(cs.arr)}; prišel ${dur(Math.abs(dev))} ${dev > 0 ? 'pozneje' : 'prej'}. `) +
-      `Odhod napovedan jutri ob ${hh(cs.dep)}.`;
-  } else if (e.type === 'full') {
-    what = 'Baterija polna'; batt = '<b>100 %</b><small>16,0 kWh</small>';
-    note = `Do zdaj s sonca ${fmt(c.sPv)} kWh, iz omrežja ${fmt(c.sGrid)} kWh.`;
+/* ---------- dnevnik polnilnic: ena vrstica na avto ---------- */
+const tcell = m => `<b>${clk(m)}</b><small>${dayM(m)}. dan</small>`;
+const bcell = (soc, e) => `<b>${pct(soc)}</b><small>${fmt(e)} kWh</small>`;
+/* Stanje vrstice ob koncu izbrane ure. */
+function logRow(c, i, end) {
+  const cs = S.cars[i];
+  const arrived = c.A < end, left = c.Dm <= end;
+  let tArr = '', tDep = '', bArr = '', bDep = '', note;
+  if (!arrived) {
+    note = `Avto še ni prispel. Napovedan prihod ${hh(cs.arr)}, odhod jutri ob ${hh(cs.dep)}.`;
   } else {
-    what = 'Odhod'; batt = `<b>${pct(c.socDep)}</b><small>${fmt(c.eDep)} kWh</small>`;
-    note = outcomeHtml(c);
+    tArr = tcell(c.A);
+    bArr = bcell(c.soc0, c.base);
+    if (left) {
+      tDep = tcell(c.Dm);
+      bDep = bcell(c.socDep, c.eDep);
+      note = outcomeHtml(c);
+    } else {
+      const h = Math.min(NH - 1, Math.floor((end - 1) / 60)), tr = c.trace[h], eNow = c.eEnd[h];
+      const dev = c.A - (cs.arr - H0) * 60;
+      note = dev ? `Prišel ${dur(Math.abs(dev))} ${dev > 0 ? 'pozneje' : 'prej'} od napovedi (${hh(cs.arr)}). ` : 'Prišel ob napovedanem času. ';
+      if (c.fullMin != null && c.fullMin <= end) note += `Baterija polna ob ${clk(c.fullMin)}. `;
+      else if (tr) note += (tr.sun > 0.005 && tr.grid > 0.005 ? `Polni s sonca ${fmt(tr.sun)} kW in iz omrežja ${fmt(tr.grid)} kW. `
+        : tr.sun > 0.005 ? `Polni s sonca ${fmt(tr.sun)} kW. ` : tr.grid > 0.005 ? `Polni iz omrežja ${fmt(tr.grid)} kW. ` : 'Čaka. ');
+      note += `Ob ${clk(end)}: ${pct(eNow / CAR.C)} (${fmt(eNow)} kWh). Napovedan odhod ${hh(cs.dep)}.`;
+    }
   }
-  const lo = 60 * S.hour, hi = lo + 60, now = e.min >= lo && e.min <= hi;
-  return `<tr class="ev-${e.type}${now ? ' cur-ev' : ''}" data-i="${e.i}" data-min="${e.min}"><td>${clk(e.min)}</td><td class="car">Avto ${LET[e.i]}</td>` +
-    `<td class="ev">${what}</td><td class="mode"><span>${IC[c.mode]}${MODE[c.mode].long}</span></td><td class="batt">${batt}</td><td class="note">${note}</td></tr>`;
+  const state = !arrived ? 'wait' : left ? 'left' : 'here';
+  return `<tr class="st-${state}${i === S.sel ? ' sel' : ''}" data-i="${i}">` +
+    `<td class="car"><b>${LET[i]}</b></td><td class="tm">${tArr}</td><td class="tm">${tDep}</td>` +
+    `<td class="mode"><span>${IC[c.mode]}${MODE[c.mode].long}</span></td>` +
+    `<td class="batt">${bArr}</td><td class="batt">${bDep}</td><td class="note">${note}</td></tr>`;
 }
 function renderLog() {
   const end = 60 * S.hour + 60;
-  const shown = EV.filter(e => e.min <= end), hidden = EV.length - shown.length;
-  let rows = '', day = 0;
-  shown.forEach(e => {
-    const d = dayM(e.min);
-    if (d !== day) { rows += `<tr class="grp"><td colspan="6">${d}. dan</td></tr>`; day = d; }
-    rows += eventRow(e);
-  });
-  $('log-tbody').innerHTML = rows || '<tr><td colspan="6" class="note">Do te ure še ni bilo dogodkov.</td></tr>';
-  $('log-sub').textContent = 'do ' + clk(end) + ', ' + dayM(end - 1) + '. dan';
-  $('log-foot').textContent = hidden ? 'Še ' + hidden + ' ' + plural(hidden, EVENTS) + ' do konca okna. Prikažejo se, ko pride njihov čas.'
-    : 'Prikazani so vsi dogodki tega okna.';
-  const box = $('log-box');
-  box.scrollTop = box.scrollHeight;
+  $('log-tbody').innerHTML = R.cars.map((c, i) => logRow(c, i, end)).join('');
+  $('log-sub').textContent = 'stanje ob ' + clk(end) + ', ' + dayM(end - 1) + '. dan';
 }
 function bindLog() {
-  $('log-tbody').addEventListener('click', e => {
-    const tr = e.target.closest('tr[data-i]'); if (!tr) return;
-    const m = +tr.dataset.min;
-    S.sel = +tr.dataset.i;
-    S.hour = clamp(Math.floor((m - 1e-3) / 60), 0, NH - 1);
-    renderControls(); renderStrip(); renderCursor();
-  });
+  $('log-tbody').addEventListener('click', e => { const tr = e.target.closest('tr[data-i]'); if (tr) selectCar(+tr.dataset.i); });
 }
 
 /* ---------- izid ---------- */
